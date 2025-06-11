@@ -1,0 +1,171 @@
+---
+title: "Summary of MiFish Amplicons"
+author: "Kimberly Ledger"
+output: html_document
+date: "2025-06-10"
+---
+
+libraries
+```{r}
+library(tidyverse)
+library(stringr)
+library(reshape2)
+rename <- dplyr::rename
+```
+
+load the lulu curated asv table 
+```{r}
+asv_table <- read.csv("/home/kimberly.ledger/dbo-mifish-mb/ref/asvtable_lulu98.csv") 
+
+#transpose 
+asv_table <- data.frame(t(asv_table))
+
+#set column names to be ASV# 
+colnames(asv_table) <- asv_table[1,]
+
+#remove row that has ASV#
+asv_table <- asv_table[-1, ]
+
+#make sure reads are numbers
+# Convert all character columns to numeric
+for (col in names(asv_table)) {
+  asv_table[[col]] <- as.numeric(asv_table[[col]])
+}
+
+asv_table$sample_ID <- rownames(asv_table)  #make make sample ID a column 
+
+#reorder columns and change NTC names to remove extra "_"
+asv_table <- asv_table %>%
+  select(sample_ID, everything()) 
+
+#lulu output changed "_" to "."
+asv_table$sample_ID <- gsub("\\.", "_", asv_table$sample_ID) 
+```
+
+load sample metadata
+```{r}
+metadata <- read.csv("/home/kimberly.ledger/dbo-mifish-mb/data/DBO2020to2024_metadata.csv") %>%
+  rename(sample_ID = library) %>%
+  mutate(sample_ID = gsub("-", "_", sample_ID)) %>%
+  mutate(sample_ID = gsub("\\.", "_", sample_ID))
+```
+
+add column to the ASV table that labels the sample type
+```{r}
+asv_table_with_sample_type <- metadata %>%
+  dplyr::select(sample_ID, sample_type) %>%
+  left_join(asv_table, by = "sample_ID") %>%
+  mutate(across(everything(), ~ replace_na(.x, 0)))
+
+# make a variable for the first and last ASV column in the table
+asv_first <- which(colnames(asv_table_with_sample_type) == "ASV_0001")  #this is the first asv column in this dataframe
+asv_last <- ncol(asv_table_with_sample_type)
+```
+
+pivot table longer 
+```{r}
+asv_table_long <- asv_table_with_sample_type %>%
+  pivot_longer(cols = c(asv_first:asv_last), names_to = "ASV", values_to = "reads") %>%
+  mutate(reads = as.numeric(reads)) %>%
+  mutate(reads = ifelse(is.na(reads), 0, reads))
+
+length(unique(asv_table_long$ASV))
+```
+
+join the taxonomic assignments
+```{r}
+taxonomy <- read.csv("/home/kimberly.ledger/dbo-mifish-mb/outputs/taxonomy_20250610_collapsed.csv") %>%
+  rename(ASV = qseqid)
+```
+
+```{r}
+taxon_table <- asv_table_long %>%
+  left_join(taxonomy, by = "ASV") %>%
+  group_by(sample_ID, sample_type, taxon, taxonomic_level, species, genus, family, order, class, kingdom) %>%
+  summarize(reads = sum(reads)) %>%
+  filter(!is.na(taxon)) %>%
+  filter(reads > 0) 
+```
+
+quick summary
+```{r}
+summary_tb <- taxon_table %>%
+  select(taxon:class, reads) %>% 
+  group_by(taxon, taxonomic_level, species, genus, family, order, class) %>%
+  summarize(total_reads = sum(reads)) %>% 
+  arrange(desc(total_reads))
+```
+
+### some visuals
+
+controls
+```{r}
+taxon_table %>%
+  filter(reads > 0) %>%
+  filter(sample_type != "sample") %>%
+  ggplot(aes(x=sample_ID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+    theme_bw() +
+  facet_wrap(~sample_type, scales = "free") +
+  labs(
+    y = "number of sequencing reads",
+    x = "sample ID",
+    title = "taxon reads in controls") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    #legend.position = "none",
+    legend.title = element_blank()
+  )
+```
+
+```{r}
+taxon_table %>%
+  filter(reads > 0) %>%
+  filter(sample_type == "sample") %>%
+  ggplot(aes(x=sample_ID, y=reads, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+    theme_bw() +
+  labs(
+    y = "number of sequencing reads",
+    x = "sample ID",
+    title = "taxon reads in field samples") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    #legend.position = "right",
+    legend.position = "none",
+    legend.title = element_blank()
+  )
+```
+
+```{r}
+sample_summary <- taxon_table %>%
+  filter(sample_type == "sample") %>%
+  select(taxon:class, reads) %>% 
+  group_by(taxon, taxonomic_level, species, genus, family, order, class) %>%
+  summarize(total_reads = sum(reads)) %>% 
+  arrange(desc(total_reads))
+```
+
+look closer at marine mammal detections 
+```{r}
+taxon_table %>%
+  filter(sample_type == "sample") %>%
+  filter(class == "Mammalia") %>%
+  select(taxon:class, reads) %>%
+  filter(!taxon %in% c("Homo sapiens", "Canis lupus", "Bos", "Sus scrofa", "Ovis", "Bos taurus", "Felis")) %>%
+  group_by(taxon) %>%
+  summarize(n_detections = n(),
+            n_reads = sum(reads)) %>%
+  arrange(desc(n_detections))
+```
+
+output taxon table 
+```{r}
+write.csv(taxon_table, "/home/kimberly.ledger/dbo-mifish-mb/outputs/taxon_table.csv")
+```
+

@@ -1,0 +1,265 @@
+---
+title: "skq2023 comparison"
+output: html_document
+date: "2025-03-26"
+---
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+skq23 <- readRDS("/home/kimberly.ledger/dbo-mifish-mb/outputs/skq23_asv_table.RDS") %>%
+  select(!r1_file) %>%
+  select(!r2_file) %>%
+  separate(sample_ID, into = c("extraction_ID", "replicate"), sep = "-", remove = F) %>%
+  mutate(replicate = ifelse(lab == "PMEL", NA, replicate)) %>%
+  filter(sample_type %in% c("sample", "field_blank")) %>%
+  filter(sample_ID != "MP_E2084_SKQ23_12S") %>%
+  filter(sample_ID != "MP_E2090_SKQ23_12S") %>%
+  filter(sample_ID != "MP_E2097_SKQ23_12S")
+```
+
+read in df that identifies which pmel IDs match the ABL IDs 
+```{r}
+ids <- read.csv("/home/kimberly.ledger/dbo-mifish-mb/data/skq2023.csv") %>%
+  select(extraction_ID, PMEL_ID, location1, location2, depth)
+```
+
+join using the ABL extractionID
+```{r}
+skq23_abl <- skq23 %>% 
+  filter(lab == "ABL") %>%
+  left_join(ids) %>%
+  rename(ABL_ID = extraction_ID)
+  
+skq23_pmel <- skq23 %>%
+  filter(lab == "PMEL") %>%
+  mutate(PMEL_ID = sub("\\.SKQ23$", "", extraction_ID)) %>%
+  left_join(ids, by = "PMEL_ID") %>%
+  rename(ABL_ID = extraction_ID.y) %>%
+  select(!extraction_ID.x)
+
+skq23_join <- skq23_abl %>%
+  bind_rows(skq23_pmel)
+```
+
+
+let me start by just plotting some samples 
+```{r}
+skq23_join %>%
+  filter(location1 == "DBO_1.1") %>%
+  ggplot(aes(x=sample_ID, y=reads, fill=ASV)) +
+  geom_bar(stat = "identity") + 
+  theme_bw() +
+  facet_wrap(~ABL_ID, scales = "free_x") + 
+  labs(
+    y = "number of sequencing reads",
+    x = "sample ID",
+    title = "ASV reads in samples") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    #legend.position = "right",
+    legend.position = "none",
+    legend.title = element_blank()
+  )
+```
+
+let me start by just plotting some samples 
+```{r}
+skq23_join %>%
+  filter(location1 == "DBO_2.4") %>%
+  ggplot(aes(x=sample_ID, y=reads, fill=ASV)) +
+  geom_bar(stat = "identity") + 
+  theme_bw() +
+  facet_wrap(~ABL_ID, scales = "free_x") + 
+  labs(
+    y = "number of sequencing reads",
+    x = "sample ID",
+    title = "ASV reads in samples") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    #legend.position = "right",
+    legend.position = "none",
+    legend.title = element_blank()
+  )
+```
+
+let me start by just plotting some samples 
+```{r}
+skq23_join %>%
+  filter(location1 == "DBO_5.6") %>%
+  ggplot(aes(x=sample_ID, y=reads, fill=ASV)) +
+  geom_bar(stat = "identity") + 
+  theme_bw() +
+  facet_wrap(~ABL_ID, scales = "free_x") + 
+  labs(
+    y = "number of sequencing reads",
+    x = "sample ID",
+    title = "ASV reads in samples") + 
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    #legend.position = "right",
+    legend.position = "none",
+    legend.title = element_blank()
+  )
+```
+
+
+
+okay, it's hard to make much from this so going to convert to taxa table
+
+```{r}
+taxonomy <- read.csv("/home/kimberly.ledger/dbo-mifish-mb/outputs/taxonomy_20250326_collapsed.csv") %>% 
+  select(!X) %>%
+  rename(ASV = qseqid) %>%
+  select(ASV, taxon) %>%
+  unique()
+
+
+taxon_table <- skq23_join %>% 
+  left_join(taxonomy) %>%
+  group_by(sample_ID, lab, cruise_id, ABL_ID, replicate, PMEL_ID, location1, location2, depth, sample_type, taxon) %>%
+  summarize(nReads = sum(reads)) %>%
+  ungroup() %>%
+  group_by(sample_ID) %>%
+  mutate(tot = sum(nReads)) %>%
+  mutate(nReads = ifelse(tot < 1000, 0, nReads)) %>% #set any sample w/ <1000 reads to be zero (ie. insufficient data for spp proportions) 
+  unite(col = "station_depth", location1, depth, sep = "_")
+```
+
+```{r}
+taxon_table %>%
+  filter(location1 == "DBO_1.1") %>%
+  filter(nReads > 0) %>%
+  group_by(sample_ID) %>%
+  mutate(prop = nReads/tot) %>%
+  ggplot(aes(x=sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  theme_bw() +
+  facet_wrap(~ABL_ID, scales = "free_x") + 
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample ID",
+    title = "taxon reads in samples") + 
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    #legend.position = "none",
+    legend.title = element_blank()
+  )
+```
+
+
+```{r}
+taxon_table %>%
+  filter(location1 == "DBO_1.2") %>%
+  filter(nReads > 0) %>%
+  group_by(sample_ID) %>%
+  mutate(prop = nReads/tot) %>%
+  ggplot(aes(x=sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  theme_bw() +
+  facet_wrap(~ABL_ID, scales = "free_x") + 
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample ID",
+    title = "taxon reads in samples") + 
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 0.95),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    #legend.position = "none",
+    legend.title = element_blank()
+  )
+```
+
+
+
+```{r}
+taxon_table %>%
+  filter(location2 == "DBO_1") %>%
+  filter(nReads > 0) %>%
+  group_by(sample_ID) %>%
+  mutate(prop = nReads/tot) %>%
+  ggplot(aes(x=sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  theme_bw() +
+  facet_wrap(~station_depth, scales = "free_x", ncol = 3) + 
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample ID",
+    title = "taxon reads in samples") + 
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 0.95, size = 4),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    #legend.position = "none",
+    legend.title = element_blank()) +
+    guides(fill = guide_legend(ncol = 1))
+```
+
+```{r}
+taxon_table %>%
+  filter(location2 == "DBO_2") %>%
+  filter(nReads > 0) %>%
+  group_by(sample_ID) %>%
+  mutate(prop = nReads/tot) %>%
+  ggplot(aes(x=sample_ID, y=prop, fill=taxon)) +
+  geom_bar(stat = "identity") + 
+  theme_bw() +
+  facet_wrap(~station_depth, scales = "free_x", ncol = 3) + 
+  labs(
+    y = "proportion of sequencing reads",
+    x = "sample ID",
+    title = "taxon reads in samples") + 
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 0.95, size = 4),
+    legend.text = element_text(size = 8),
+    legend.key.size = unit(0.3, "cm"),
+    legend.position = "right",
+    #legend.position = "none",
+    legend.title = element_blank()) +
+    guides(fill = guide_legend(ncol = 1))
+```
+
+
+trying to make sense on the similarity/difference of the ABL vs PMEL preps 
+
+```{r}
+taxon_table %>% 
+  filter(nReads > 0) %>%
+  group_by(lab, station_depth) %>%
+  summarize(richness = n_distinct(taxon)) %>%
+  pivot_wider(names_from = "lab", values_from = "richness")
+
+taxon_table %>% 
+  filter(nReads > 0) %>%
+  group_by(lab, replicate) %>%
+  summarize(richness = n_distinct(taxon),
+            total_reads = sum(nReads))
+```
+
+** more reads in PMEL but similar richness (when combining ABL replicates)
+
+```{r}
+taxon_table %>% 
+  filter(nReads > 0) %>%
+  group_by(lab, taxon) %>%
+  summarize(total_reads = sum(nReads)) %>%
+  pivot_wider(names_from = "lab", values_from = "total_reads")
+```
+
+
+** there's catch data to relate this to!  
+
