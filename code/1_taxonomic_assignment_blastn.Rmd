@@ -105,10 +105,47 @@ nf_seq_id_diff <- not_Actinopteri %>%
         arrange(diff)
 ```
 
-after manually looking through the assignments, removing Pusa sibirica and filtering by diff = 0 cleans up the assignments 
+Now you have the single best entry for each species for each sequence ranked and with the difference between the first and second ranked entries calculated.
+** if there is a sequence that is at least a 99% match, then keep just the sequences within 0.5%  
+** if there is NOT at least a 99% match, keep the top 1% 
+
+### ASVs with 99% match or not 
 ```{r}
+nf_match_99 <- nf_seq_id_diff %>%
+  filter(top_perc >= 99) %>%
+  select(qseqid) %>%
+  unique()
+
+nf_match_lessthan99<- nf_seq_id_diff %>%
+  filter(top_perc < 99) %>%
+  select(qseqid) %>%
+  unique()
+```
+
+### filter based on percent identity 
+```{r}
+nf_match_99_to_remove_low_perc_hits <- nf_seq_id_diff %>%
+  ungroup() %>%
+  filter(qseqid %in% nf_match_99$qseqid) %>%
+  group_by(qseqid) %>%
+  filter(diff > 0.5)
+
+nf_match_lessthan99_to_remove_low_perc_hits <- nf_seq_id_diff %>%
+  ungroup() %>%
+  filter(qseqid %in% nf_match_lessthan99$qseqid) %>%
+  group_by(qseqid) %>%
+  filter(diff > 1)
+
+nf_to_remove_low_perc_hits <- nf_match_99_to_remove_low_perc_hits %>%
+  bind_rows(nf_match_lessthan99_to_remove_low_perc_hits)
+
 nf_keepers <- nf_seq_id_diff %>%
-  filter(diff == 0) %>%
+  anti_join(nf_to_remove_low_perc_hits)
+```
+
+after manually looking through the assignments, removing Pusa sibirica 
+```{r}
+nf_keepers <- nf_keepers %>%
   filter(!species == "Pusa sibirica")
 
 nf_singletons <- nf_keepers %>%
@@ -324,45 +361,45 @@ seq_id_diff <- taxon_df_reduced %>%
 
 Now you have the single best entry for each species for each sequence ranked and with the difference between the first and second ranked entries calculated.
 
-For sequences with multiple top hits, where the difference between ranked taxa = 0, you will end up defaulting to genus- or family-level ID. We'll do the same for any sequences where the difference between the first and second ranked taxa is < 1%.
-
-** if there is a sequence that is a 100% match, then keep just the sequences within 0.5%  
-** if there is NOT a 100% match, keep the top 1% 
+Now you have the single best entry for each species for each sequence ranked and with the difference between the first and second ranked entries calculated.
+** if there is a sequence that is >99 % match, then keep just the sequences within 0.5%  
+** if there is NOT >99% match, keep the top 1% 
 
 ## ASVs with 100% match 
 ```{r}
-match_100 <- seq_id_diff %>%
-  filter(top_perc == 100) %>%
+match_99 <- seq_id_diff %>%
+  filter(top_perc >= 99) %>%
   select(qseqid) %>%
   unique()
 
-match_lessthan100 <- seq_id_diff %>%
-  filter(top_perc != 100) %>%
+match_lessthan99 <- seq_id_diff %>%
+  filter(top_perc < 99) %>%
   select(qseqid) %>%
   unique()
 ```
 
 
-## Figure out which differences are **> 1%** and eliminate those first
+## filter based on percent identity 
 ```{r}
-# filter out any taxa that are >1% less matching identity than the top taxonomic hit for a given sequence
-match_100_to_remove_low_perc_hits <- seq_id_diff %>%
+match_99_to_remove_low_perc_hits <- seq_id_diff %>%
   ungroup() %>%
-  filter(qseqid %in% match_100$qseqid) %>%
+  filter(qseqid %in% match_99$qseqid) %>%
   group_by(qseqid) %>%
   filter(diff > 0.5)
 
-match_lessthan100_to_remove_low_perc_hits <- seq_id_diff %>%
+match_lessthan99_to_remove_low_perc_hits <- seq_id_diff %>%
   ungroup() %>%
-  filter(qseqid %in% match_lessthan100$qseqid) %>%
+  filter(qseqid %in% match_lessthan99$qseqid) %>%
   group_by(qseqid) %>%
   filter(diff > 1)
 
-to_remove_low_perc_hits <- match_100_to_remove_low_perc_hits %>%
-  bind_rows(match_lessthan100_to_remove_low_perc_hits)
+to_remove_low_perc_hits <- match_99_to_remove_low_perc_hits %>%
+  bind_rows(match_lessthan99_to_remove_low_perc_hits)
 
 keepers <- seq_id_diff %>%
   anti_join(to_remove_low_perc_hits)
+
+unique(keepers$species)
 ```
 
 ## so now determine whether ASVs should be assigned to genus, family, order, etc. 
@@ -517,7 +554,9 @@ taxon_df_collapsed <- taxon_df_all %>%
   mutate(species = ifelse(taxonomic_level == "family", NA, species),
          genus = ifelse(taxonomic_level == "family", NA, genus),
          species = ifelse(taxonomic_level == "genus", NA, species),
-         family = ifelse(taxonomic_level == "order", NA, family)) %>%
+         family = ifelse(taxonomic_level == "order", NA, family),
+         genus = ifelse(taxonomic_level == "order", NA, genus),
+         species = ifelse(taxonomic_level == "order", NA, species)) %>%
   select(qseqid, taxon, taxonomic_level, species, genus, family, order, class, phylum, kingdom) %>%
   unique()
 ```
